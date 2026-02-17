@@ -1,0 +1,324 @@
+/* ===== Reset & Base ===== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    background: #0a0e17;
+    color: #e0e0e0;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+}
+
+/* ===== Screen System ===== */
+.screen {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.screen.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ===== Start Screen ===== */
+.start-container {
+    text-align: center;
+    max-width: 500px;
+    padding: 40px;
+}
+
+.title {
+    font-size: 3rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, #f79e02, #f44336);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 12px;
+    letter-spacing: 4px;
+}
+
+.subtitle {
+    font-size: 1.1rem;
+    color: #888;
+    margin-bottom: 40px;
+}
+
+.settings-form {
+    margin-bottom: 32px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.85rem;
+    color: #999;
+    margin-bottom: 6px;
+}
+
+.form-group select,
+.form-group input {
+    width: 100%;
+    padding: 12px 16px;
+    background: #151a28;
+    border: 1px solid #2a2f3d;
+    border-radius: 8px;
+    color: #e0e0e0;
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.form-group select:focus,
+.form-group input:focus {
+    border-color: #f79e02;
+}
+
+.btn-primary {
+    padding: 14px 48px;
+    background: linear-gradient(135deg, #f79e02, #e88b00);
+    color: #0a0e17;
+    border: none;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.btn-primary:hover {
+    transform: scale(1.03);
+    box-shadow: 0 4px 20px rgba(247, 158, 2, 0.3);
+}
+
+.btn-secondary {
+    padding: 14px 48px;
+    background: transparent;
+    color: #f79e02;
+    border: 1px solid #f79e02;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn-secondary:hover {
+    background: rgba(247, 158, 2, 0.1);
+}
+
+.hint {
+    margin-top: 16px;
+    font-size: 0.8rem;
+    color: #555;
+}
+
+/* ===== Game Screen ===== */
+#screen-game {
+    background: #111;
+    cursor: none;
+}
+
+#game-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+#game-hud {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 24px;
+    z-index: 10;
+}
+
+.hud-item {
+    background: rgba(0, 0, 0, 0.6);
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: #ccc;
+    backdrop-filter: blur(4px);
+}
+
+#crosshair {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #0f0;
+    font-size: 24px;
+    font-weight: 300;
+    pointer-events: none;
+    z-index: 10;
+    text-shadow: 0 0 4px rgba(0, 255, 0, 0.5);
+    display: none;
+}
+
+/* ===== Result Screen ===== */
+#screen-result {
+    background: #0a0e17;
+    overflow-y: auto;
+}
+
+.result-container {
+    text-align: center;
+    max-width: 640px;
+    padding: 40px 20px;
+    margin: 0 auto;
+}
+
+.result-container h2 {
+    font-size: 2rem;
+    margin-bottom: 24px;
+    background: linear-gradient(135deg, #f79e02, #f44336);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+#result-card {
+    margin-bottom: 32px;
+}
+
+#result-canvas {
+    max-width: 100%;
+    border-radius: 12px;
+    border: 1px solid #2a2f3d;
+}
+
+#result-details {
+    margin-bottom: 32px;
+}
+
+.result-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: #151a28;
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.result-label {
+    color: #888;
+}
+
+.result-value {
+    font-weight: 700;
+    color: #f79e02;
+    font-size: 1.1rem;
+}
+
+.ow-guide {
+    text-align: left;
+    background: #151a28;
+    padding: 24px;
+    border-radius: 12px;
+    margin-bottom: 32px;
+}
+
+.ow-guide h3 {
+    margin-bottom: 12px;
+    color: #f79e02;
+}
+
+.ow-guide ol {
+    padding-left: 20px;
+    line-height: 1.8;
+}
+
+.ow-guide strong {
+    color: #f79e02;
+}
+
+/* ===== DPI Input Section (결과 화면) ===== */
+.dpi-input-section {
+    margin-bottom: 28px;
+}
+
+.dpi-prompt {
+    font-size: 0.9rem;
+    color: #888;
+    margin-bottom: 12px;
+}
+
+.dpi-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.dpi-btn {
+    padding: 8px 20px;
+    background: #151a28;
+    border: 1px solid #2a2f3d;
+    border-radius: 6px;
+    color: #999;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.dpi-btn:hover {
+    border-color: #f79e02;
+    color: #e0e0e0;
+}
+
+.dpi-btn.active {
+    background: rgba(247, 158, 2, 0.15);
+    border-color: #f79e02;
+    color: #f79e02;
+}
+
+.dpi-custom {
+    max-width: 160px;
+    margin: 0 auto;
+}
+
+.dpi-custom input {
+    width: 100%;
+    padding: 8px 12px;
+    background: #151a28;
+    border: 1px solid #2a2f3d;
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 0.9rem;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.dpi-custom input:focus {
+    border-color: #f79e02;
+}
+
+.dpi-custom input::placeholder {
+    color: #555;
+}
+
+.result-actions {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
