@@ -3,9 +3,7 @@
  */
 
 const Result = (() => {
-    /**
-     * 결과 화면 업데이트
-     */
+
     function show(data) {
         // 수치 표시
         document.getElementById('result-sens').textContent = data.recommendedSens;
@@ -20,17 +18,14 @@ const Result = (() => {
         drawResultCard(data);
     }
 
-    /**
-     * 결과 카드 그리기 (이미지 저장/공유용)
-     */
     function drawResultCard(data) {
-        const canvas = document.getElementById('result-canvas');
-        const ctx = canvas.getContext('2d');
-        const w = canvas.width;
-        const h = canvas.height;
+        var canvas = document.getElementById('result-canvas');
+        var ctx = canvas.getContext('2d');
+        var w = canvas.width;
+        var h = canvas.height;
 
         // 배경
-        const bgGrad = ctx.createLinearGradient(0, 0, w, h);
+        var bgGrad = ctx.createLinearGradient(0, 0, w, h);
         bgGrad.addColorStop(0, '#0a0e17');
         bgGrad.addColorStop(1, '#141830');
         ctx.fillStyle = bgGrad;
@@ -45,67 +40,75 @@ const Result = (() => {
         ctx.fillStyle = '#f79e02';
         ctx.font = 'bold 28px Segoe UI, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('AIM CALIBRATOR', w / 2, 45);
+        ctx.fillText('AIM CALIBRATOR', w / 2, 40);
 
         ctx.fillStyle = '#666';
         ctx.font = '14px Segoe UI, sans-serif';
-        ctx.fillText('오버워치 감도 캘리브레이션 결과', w / 2, 68);
+        ctx.fillText('오버워치 감도 캘리브레이션 결과', w / 2, 62);
 
-        // 큰 감도 수치
+        // 원래 감도 → 추천 감도
+        ctx.fillStyle = '#666';
+        ctx.font = '16px Segoe UI, sans-serif';
+        ctx.fillText(data.originalSens + '  →', w / 2 - 60, 100);
+
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 64px Segoe UI, sans-serif';
-        ctx.fillText(data.recommendedSens, w / 2, 140);
+        ctx.font = 'bold 48px Segoe UI, sans-serif';
+        ctx.fillText(data.recommendedSens, w / 2 + 40, 105);
 
         ctx.fillStyle = '#888';
-        ctx.font = '16px Segoe UI, sans-serif';
-        ctx.fillText('추천 감도', w / 2, 165);
+        ctx.font = '13px Segoe UI, sans-serif';
+        ctx.fillText('기존 감도          추천 감도', w / 2, 125);
 
         // 구분선
         ctx.strokeStyle = '#2a2f3d';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(40, 185);
-        ctx.lineTo(w - 40, 185);
+        ctx.moveTo(40, 140);
+        ctx.lineTo(w - 40, 140);
         ctx.stroke();
 
-        // 상세 정보
-        const infoY = 220;
-        const cols = [
+        // 상세 정보 (4열)
+        var infoY = 172;
+        var cols = [
             { label: 'DPI', value: data.dpi },
             { label: 'eDPI', value: data.edpi },
-            { label: 'cm/360', value: data.cm360 + 'cm' }
+            { label: 'cm/360', value: data.cm360 + 'cm' },
+            { label: '배율', value: data.multiplier + 'x' }
         ];
 
-        cols.forEach((col, i) => {
-            const x = 100 + i * 160;
+        for (var i = 0; i < cols.length; i++) {
+            var x = 75 + i * 120;
             ctx.fillStyle = '#f79e02';
-            ctx.font = 'bold 24px Segoe UI, sans-serif';
+            ctx.font = 'bold 20px Segoe UI, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(col.value, x, infoY);
+            ctx.fillText(cols[i].value, x, infoY);
 
             ctx.fillStyle = '#666';
-            ctx.font = '13px Segoe UI, sans-serif';
-            ctx.fillText(col.label, x, infoY + 22);
-        });
+            ctx.font = '12px Segoe UI, sans-serif';
+            ctx.fillText(cols[i].label, x, infoY + 18);
+        }
 
-        // 감도 변화 그래프
-        drawSensGraph(ctx, data.sensHistory, 40, 270, w - 80, 90);
+        // 감도 변화 그래프 (OW 감도 단위)
+        drawSensGraph(ctx, data.sensHistory, 40, 220, w - 80, 100);
 
         // 통계
-        const statsY = 380;
+        var statsY = 340;
         ctx.fillStyle = '#555';
         ctx.font = '12px Segoe UI, sans-serif';
         ctx.textAlign = 'center';
-        const timeoutText = data.stats.timeouts > 0 ? ` | 타임아웃 ${data.stats.timeouts}회` : '';
+        var timeoutText = data.stats.timeouts > 0 ? ' | 타임아웃 ' + data.stats.timeouts + '회' : '';
         ctx.fillText(
-            `정확도 ${data.stats.accuracy}% | 반응속도 ${data.stats.avgReactionMs}ms | 오버슈팅 ${data.stats.overshoots}회 | 언더슈팅 ${data.stats.undershoots}회${timeoutText}`,
+            '정확도 ' + data.stats.accuracy + '% | 반응속도 ' + data.stats.avgReactionMs + 'ms | ' +
+            '오버슈팅 ' + data.stats.overshoots + '회 | 언더슈팅 ' + data.stats.undershoots + '회' + timeoutText,
             w / 2, statsY
         );
+
+        // 하단 워터마크
+        ctx.fillStyle = '#333';
+        ctx.font = '10px Segoe UI, sans-serif';
+        ctx.fillText('aim-calibrator.vercel.app', w / 2, h - 10);
     }
 
-    /**
-     * 감도 변화 그래프
-     */
     function drawSensGraph(ctx, history, x, y, w, h) {
         if (!history || history.length < 2) return;
 
@@ -117,57 +120,58 @@ const Result = (() => {
         ctx.fillStyle = '#555';
         ctx.font = '11px Segoe UI, sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText('배율 변화', x + 4, y - 4);
+        ctx.fillText('감도 변화 (OW 감도)', x + 4, y - 4);
 
-        const vals = history.map(h => h.multiplier);
-        const minV = Math.min(...vals) - 0.2;
-        const maxV = Math.max(...vals) + 0.2;
-        const range = maxV - minV || 1;
+        // OW 감도 기준 그래프
+        var vals = [];
+        for (var k = 0; k < history.length; k++) {
+            vals.push(history[k].owSens);
+        }
+        var minV = Math.min.apply(null, vals) - 0.5;
+        var maxV = Math.max.apply(null, vals) + 0.5;
+        var range = maxV - minV || 1;
 
         // 선 그리기
         ctx.beginPath();
         ctx.strokeStyle = '#f79e02';
         ctx.lineWidth = 2;
 
-        history.forEach((point, i) => {
-            const px = x + (i / (history.length - 1)) * w;
-            const py = y + h - ((point.multiplier - minV) / range) * h;
+        for (var i = 0; i < history.length; i++) {
+            var px = x + (i / (history.length - 1)) * w;
+            var py = y + h - ((history[i].owSens - minV) / range) * h;
             if (i === 0) ctx.moveTo(px, py);
             else ctx.lineTo(px, py);
-        });
+        }
         ctx.stroke();
 
         // 포인트
-        history.forEach((point, i) => {
-            const px = x + (i / (history.length - 1)) * w;
-            const py = y + h - ((point.multiplier - minV) / range) * h;
+        for (var j = 0; j < history.length; j++) {
+            var px2 = x + (j / (history.length - 1)) * w;
+            var py2 = y + h - ((history[j].owSens - minV) / range) * h;
 
             ctx.beginPath();
-            ctx.arc(px, py, 3, 0, Math.PI * 2);
+            ctx.arc(px2, py2, 3, 0, Math.PI * 2);
             ctx.fillStyle = '#f79e02';
             ctx.fill();
-        });
+        }
 
         // 최종값 표시
-        const last = history[history.length - 1];
-        const lastX = x + w;
-        const lastY = y + h - ((last.multiplier - minV) / range) * h;
+        var last = history[history.length - 1];
+        var lastX = x + w;
+        var lastY = y + h - ((last.owSens - minV) / range) * h;
         ctx.fillStyle = '#f79e02';
         ctx.font = 'bold 12px Segoe UI, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(last.multiplier + 'x', lastX - 4, lastY - 8);
+        ctx.fillText(last.owSens, lastX - 4, lastY - 8);
     }
 
-    /**
-     * 결과 이미지 저장
-     */
     function saveImage() {
-        const canvas = document.getElementById('result-canvas');
-        const link = document.createElement('a');
+        var canvas = document.getElementById('result-canvas');
+        var link = document.createElement('a');
         link.download = 'aim-calibrator-result.png';
         link.href = canvas.toDataURL('image/png');
         link.click();
     }
 
-    return { show, saveImage };
+    return { show: show, saveImage: saveImage };
 })();

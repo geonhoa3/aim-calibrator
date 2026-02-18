@@ -131,6 +131,43 @@ body {
     color: #555;
 }
 
+.start-dpi-buttons {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.label-hint {
+    color: #666;
+    font-size: 0.75rem;
+}
+
+.sens-input {
+    width: 100%;
+    padding: 12px 16px;
+    background: #151a28;
+    border: 1px solid #2a2f3d;
+    border-radius: 8px;
+    color: #f79e02;
+    font-size: 1.3rem;
+    font-weight: 700;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.sens-input:focus {
+    border-color: #f79e02;
+}
+
+.input-desc {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    color: #666;
+}
+
 /* ===== Game Screen ===== */
 #screen-game {
     background: #111;

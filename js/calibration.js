@@ -1,22 +1,20 @@
 /**
  * calibration.js - 캘리브레이션 알고리즘
  *
- * DPI 독립적 설계:
- *   - 게임 중에는 순수 "배율(multiplier)"로만 캘리브레이션
- *   - 결과 화면에서 DPI 입력받아 오버워치 감도로 변환
+ * 감도 매칭 설계:
+ *   - 시작 시 DPI + OW 현재감도를 입력받음
+ *   - 웹 게임의 마우스 느낌 = 인게임과 동일 (배율 1.0)
+ *   - 캘리브레이션은 배율(multiplier)을 이진탐색으로 조정
+ *   - 최종 추천 감도 = 현재감도 × 최종배율
  *
  * 종료 조건 (PID 수렴 방식):
  *   - 최소 MIN_ROUNDS 라운드 진행
  *   - 최근 STABLE_WINDOW회의 배율 변동폭이 STABLE_THRESHOLD 이하면 수렴
  *   - 최대 MAX_ROUNDS에 도달하면 강제 종료
- *
- * 3D 호환:
- *   - trail 데이터는 angularDistance (radian) 사용
- *   - 임계값도 radian 기준
  */
 
 const Calibration = (() => {
-    // 라운드 설정 (강화된 수렴 기준)
+    // 라운드 설정
     const MIN_ROUNDS = 12;
     const MAX_ROUNDS = 30;
     const STABLE_WINDOW = 8;
@@ -27,9 +25,13 @@ const Calibration = (() => {
     const MULT_MAX = 5.0;
 
     // 분석 임계값 (radian 기준)
-    const OVERSHOOT_DIST = 0.08;    // ~4.6도, 오버슈팅 감지
-    const APPROACH_DIST = 0.05;     // ~2.9도, 타임아웃 시 접근 판정
-    const UNDERSHOOT_DIST = 0.03;   // ~1.7도, 언더슈팅 거리
+    const OVERSHOOT_DIST = 0.08;
+    const APPROACH_DIST = 0.05;
+    const UNDERSHOOT_DIST = 0.03;
+
+    // 사용자 입력값
+    let userDPI = 1600;
+    let userOWSens = 5;
 
     // 캘리브레이션 상태
     let currentRound = 0;
@@ -40,18 +42,9 @@ const Calibration = (() => {
     let multLow = MULT_MIN;
     let multHigh = MULT_MAX;
 
-    function multiplierToOWSens(multiplier, dpi) {
-        const baseSens = 5;
-        const baseDPI = 800;
-        const owSens = multiplier * baseSens * (baseDPI / dpi);
-        return Math.round(owSens * 100) / 100;
-    }
-
-    function calcCm360(owSens, dpi) {
-        return (360 * 2.54) / (dpi * owSens * 0.0066);
-    }
-
-    function init() {
+    function init(dpi, owSens) {
+        userDPI = dpi || 1600;
+        userOWSens = owSens || 5;
         currentRound = 0;
         shotHistory = [];
         currentMultiplier = 1.0;
@@ -59,13 +52,17 @@ const Calibration = (() => {
         multHigh = MULT_MAX;
     }
 
+    function calcCm360(owSens, dpi) {
+        return (360 * 2.54) / (dpi * owSens * 0.0066);
+    }
+
     function isConverged() {
         if (shotHistory.length < STABLE_WINDOW) return false;
 
-        const recent = shotHistory.slice(-STABLE_WINDOW);
-        const multipliers = recent.map(s => s.multiplier);
-        const min = Math.min(...multipliers);
-        const max = Math.max(...multipliers);
+        var recent = shotHistory.slice(-STABLE_WINDOW);
+        var multipliers = recent.map(function (s) { return s.multiplier; });
+        var min = Math.min.apply(null, multipliers);
+        var max = Math.max.apply(null, multipliers);
 
         return (max - min) <= STABLE_THRESHOLD;
     }
@@ -73,12 +70,21 @@ const Calibration = (() => {
     function processShotData(shotData) {
         currentRound++;
 
-        const analysis = analyzeShot(shotData);
-        shotHistory.push({ ...shotData, analysis, multiplier: currentMultiplier });
+        var analysis = analyzeShot(shotData);
+        shotHistory.push({
+            hit: shotData.hit,
+            timeout: shotData.timeout,
+            angularDistance: shotData.angularDistance,
+            reactionTime: shotData.reactionTime,
+            trail: shotData.trail,
+            sensitivity: shotData.sensitivity,
+            analysis: analysis,
+            multiplier: currentMultiplier
+        });
 
-        const converged = currentRound >= MIN_ROUNDS && isConverged();
-        const maxReached = currentRound >= MAX_ROUNDS;
-        const isComplete = converged || maxReached;
+        var converged = currentRound >= MIN_ROUNDS && isConverged();
+        var maxReached = currentRound >= MAX_ROUNDS;
+        var isComplete = converged || maxReached;
 
         if (!isComplete) {
             adjustMultiplier(analysis);
@@ -87,25 +93,18 @@ const Calibration = (() => {
         return {
             nextMultiplier: currentMultiplier,
             round: currentRound,
-            analysis,
-            isComplete,
-            converged
+            analysis: analysis,
+            isComplete: isComplete,
+            converged: converged
         };
     }
 
-    /**
-     * 사격 패턴 분석 (3D angularDistance 기반)
-     *
-     * trail[].angularDistance = 카메라 정면 ↔ 타겟 방향 각도 (radian)
-     * 0에 가까울수록 정조준
-     */
     function analyzeShot(shotData) {
-        // 타임아웃 처리
         if (shotData.timeout) {
-            const trail = shotData.trail;
-            let wasApproaching = false;
+            var trail = shotData.trail;
+            var wasApproaching = false;
             if (trail.length >= 2) {
-                const last = trail[trail.length - 1];
+                var last = trail[trail.length - 1];
                 wasApproaching = last.angularDistance > APPROACH_DIST;
             }
             return {
@@ -118,23 +117,22 @@ const Calibration = (() => {
             };
         }
 
-        const trail = shotData.trail;
+        var trail = shotData.trail;
         if (trail.length < 3) {
             return { type: 'neutral', overshoots: 0, corrections: 0, score: 0 };
         }
 
-        let overshoots = 0;
-        let corrections = 0;
-        let closestDist = Infinity;
-        let passedTarget = false;
+        var overshoots = 0;
+        var corrections = 0;
+        var closestDist = Infinity;
+        var passedTarget = false;
 
-        for (let i = 1; i < trail.length; i++) {
-            const prevDist = trail[i - 1].angularDistance;
-            const currDist = trail[i].angularDistance;
+        for (var i = 1; i < trail.length; i++) {
+            var prevDist = trail[i - 1].angularDistance;
+            var currDist = trail[i].angularDistance;
 
             closestDist = Math.min(closestDist, currDist);
 
-            // 가까워지다가 멀어짐 = 오버슈팅
             if (prevDist < currDist && prevDist < OVERSHOOT_DIST) {
                 if (!passedTarget) {
                     overshoots++;
@@ -142,36 +140,35 @@ const Calibration = (() => {
                 }
             }
 
-            // 다시 가까워짐 = 교정
             if (prevDist > currDist && passedTarget) {
                 corrections++;
                 passedTarget = false;
             }
         }
 
-        let score = 0;
+        var score = 0;
         if (overshoots > 1) {
             score = Math.min(overshoots, 5);
         } else if (corrections === 0 && shotData.angularDistance > UNDERSHOOT_DIST) {
             score = -2;
         }
 
-        const type = score > 0 ? 'overshoot' : score < 0 ? 'undershoot' : 'neutral';
+        var type = score > 0 ? 'overshoot' : score < 0 ? 'undershoot' : 'neutral';
 
-        return { type, overshoots, corrections, score, closestDist, timeout: false };
+        return { type: type, overshoots: overshoots, corrections: corrections, score: score, closestDist: closestDist, timeout: false };
     }
 
     function adjustMultiplier(analysis) {
-        const progress = currentRound / MAX_ROUNDS;
-        const adjustFactor = 1 - progress * 0.7;
+        var progress = currentRound / MAX_ROUNDS;
+        var adjustFactor = 1 - progress * 0.7;
 
         if (analysis.type === 'overshoot') {
             multHigh = currentMultiplier;
-            const diff = (currentMultiplier - multLow) * 0.4 * adjustFactor;
+            var diff = (currentMultiplier - multLow) * 0.4 * adjustFactor;
             currentMultiplier = Math.max(multLow, currentMultiplier - diff);
         } else if (analysis.type === 'undershoot') {
             multLow = currentMultiplier;
-            const diff = (multHigh - currentMultiplier) * 0.4 * adjustFactor;
+            var diff = (multHigh - currentMultiplier) * 0.4 * adjustFactor;
             currentMultiplier = Math.min(multHigh, currentMultiplier + diff);
         }
 
@@ -179,44 +176,52 @@ const Calibration = (() => {
         currentMultiplier = Math.max(MULT_MIN, Math.min(MULT_MAX, currentMultiplier));
     }
 
-    function getResult(dpi) {
-        const owSens = multiplierToOWSens(currentMultiplier, dpi);
-        const edpi = Math.round(dpi * owSens);
-        const cm360 = Math.round(calcCm360(owSens, dpi) * 10) / 10;
+    /**
+     * 결과 계산
+     * 추천 감도 = 현재 OW감도 × 최종배율
+     */
+    function getResult() {
+        var recommendedSens = Math.round(userOWSens * currentMultiplier * 100) / 100;
+        var edpi = Math.round(userDPI * recommendedSens);
+        var cm360 = Math.round(calcCm360(recommendedSens, userDPI) * 10) / 10;
 
-        const hits = shotHistory.filter(s => s.hit).length;
-        const timeouts = shotHistory.filter(s => s.timeout).length;
-        const validShots = shotHistory.filter(s => !s.timeout);
-        const avgReaction = validShots.length > 0
-            ? validShots.reduce((sum, s) => sum + s.reactionTime, 0) / validShots.length
+        var hits = shotHistory.filter(function (s) { return s.hit; }).length;
+        var timeouts = shotHistory.filter(function (s) { return s.timeout; }).length;
+        var validShots = shotHistory.filter(function (s) { return !s.timeout; });
+        var avgReaction = validShots.length > 0
+            ? validShots.reduce(function (sum, s) { return sum + s.reactionTime; }, 0) / validShots.length
             : 0;
-        const overshoots = shotHistory.filter(s => s.analysis.type === 'overshoot').length;
-        const undershoots = shotHistory.filter(s => s.analysis.type === 'undershoot').length;
+        var overshoots = shotHistory.filter(function (s) { return s.analysis.type === 'overshoot'; }).length;
+        var undershoots = shotHistory.filter(function (s) { return s.analysis.type === 'undershoot'; }).length;
 
-        const sensHistory = shotHistory.map((s, i) => ({
-            round: i + 1,
-            multiplier: s.multiplier
-        }));
+        var sensHistory = shotHistory.map(function (s, i) {
+            return {
+                round: i + 1,
+                multiplier: s.multiplier,
+                owSens: Math.round(userOWSens * s.multiplier * 100) / 100
+            };
+        });
 
         return {
             multiplier: currentMultiplier,
-            recommendedSens: owSens,
-            dpi,
-            edpi,
-            cm360,
+            recommendedSens: recommendedSens,
+            originalSens: userOWSens,
+            dpi: userDPI,
+            edpi: edpi,
+            cm360: cm360,
             totalRounds: shotHistory.length,
             stats: {
                 totalShots: shotHistory.length,
-                hits,
-                timeouts,
+                hits: hits,
+                timeouts: timeouts,
                 accuracy: Math.round((hits / shotHistory.length) * 100),
                 avgReactionMs: Math.round(avgReaction),
-                overshoots,
-                undershoots
+                overshoots: overshoots,
+                undershoots: undershoots
             },
-            sensHistory
+            sensHistory: sensHistory
         };
     }
 
-    return { init, processShotData, getResult };
+    return { init: init, processShotData: processShotData, getResult: getResult };
 })();

@@ -13,6 +13,30 @@
             <h1 class="title">AIM CALIBRATOR</h1>
             <p class="subtitle">당신의 최적 오버워치 감도를 찾아드립니다</p>
 
+            <div class="settings-form">
+                <!-- DPI 입력 -->
+                <div class="form-group">
+                    <label>마우스 DPI</label>
+                    <div class="dpi-buttons start-dpi-buttons">
+                        <button class="dpi-btn" data-dpi="400">400</button>
+                        <button class="dpi-btn" data-dpi="800">800</button>
+                        <button class="dpi-btn" data-dpi="1200">1200</button>
+                        <button class="dpi-btn active" data-dpi="1600">1600</button>
+                        <button class="dpi-btn" data-dpi="3200">3200</button>
+                    </div>
+                    <div class="dpi-custom">
+                        <input type="number" id="input-start-dpi" placeholder="직접 입력" min="100" max="25600">
+                    </div>
+                </div>
+
+                <!-- 오버워치 현재 감도 입력 -->
+                <div class="form-group">
+                    <label>오버워치 현재 감도 <span class="label-hint">(옵션 → 조작 → 마우스 감도)</span></label>
+                    <input type="number" id="input-ow-sens" value="5" min="0.01" max="100" step="0.01" class="sens-input">
+                    <p class="input-desc">현재 인게임 감도와 동일한 느낌으로 시작합니다</p>
+                </div>
+            </div>
+
             <button id="btn-start" class="btn-primary">캘리브레이션 시작</button>
             <p class="hint">화면을 클릭하면 마우스가 잠깁니다. ESC로 해제 가능</p>
         </div>
@@ -22,8 +46,8 @@
     <div id="screen-game" class="screen">
         <canvas id="game-canvas"></canvas>
         <div id="game-hud">
-            <div class="hud-item" id="hud-round">라운드: 1 / 15</div>
-            <div class="hud-item" id="hud-sens">배율: -</div>
+            <div class="hud-item" id="hud-round">라운드: 1</div>
+            <div class="hud-item" id="hud-sens">감도: -</div>
         </div>
         <div id="crosshair">
             <div class="ch-dot"></div>
@@ -39,21 +63,6 @@
     <div id="screen-result" class="screen">
         <div class="result-container">
             <h2>캘리브레이션 완료!</h2>
-
-            <!-- DPI 입력 (결과 변환용) -->
-            <div class="dpi-input-section">
-                <p class="dpi-prompt">마우스 DPI를 선택하면 오버워치 감도로 변환해드립니다</p>
-                <div class="dpi-buttons">
-                    <button class="dpi-btn" data-dpi="400">400</button>
-                    <button class="dpi-btn active" data-dpi="800">800</button>
-                    <button class="dpi-btn" data-dpi="1200">1200</button>
-                    <button class="dpi-btn" data-dpi="1600">1600</button>
-                    <button class="dpi-btn" data-dpi="3200">3200</button>
-                </div>
-                <div class="dpi-custom">
-                    <input type="number" id="input-dpi-custom" placeholder="직접 입력" min="100" max="25600">
-                </div>
-            </div>
 
             <div id="result-card">
                 <canvas id="result-canvas" width="600" height="400"></canvas>
@@ -78,7 +87,7 @@
                 <ol>
                     <li>오버워치 실행 → 옵션 → 조작</li>
                     <li>마우스 감도를 <strong id="guide-sens">-</strong>(으)로 변경</li>
-                    <li>마우스 DPI를 <strong id="guide-dpi">-</strong>(으)로 설정</li>
+                    <li>마우스 DPI는 <strong id="guide-dpi">-</strong> 유지</li>
                 </ol>
             </div>
 

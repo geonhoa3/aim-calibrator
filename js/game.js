@@ -29,8 +29,8 @@ const Game = (() => {
     let mouseTrail = [];
 
     // 감도
-    let sensitivity = 1.0;
-    const BASE_TURN_RATE = 0.003;
+    let sensitivity = 1.0;     // 캘리브레이션 배율 (1.0 = 현재 감도 그대로)
+    let baseTurnRate = 0.003;  // DPI × OW감도 기반 계산값 (rad/px)
 
     // 설정
     const CAMERA_HEIGHT = 1.7;
@@ -238,8 +238,18 @@ const Game = (() => {
         renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
-    function start(sens, onShot) {
-        sensitivity = sens;
+    /**
+     * @param {Object} config - { dpi, owSens, multiplier }
+     *   dpi: 마우스 DPI (e.g. 1600)
+     *   owSens: 오버워치 현재 감도 (e.g. 2.45)
+     *   multiplier: 캘리브레이션 배율 (시작 시 1.0)
+     * @param {Function} onShot - 사격 콜백
+     */
+    function start(config, onShot) {
+        // OW 감도 공식: 1px 이동 시 회전량 = owSens × 0.0066도
+        // rad/px = owSens × 0.0066 × (π/180)
+        baseTurnRate = config.owSens * 0.0066 * (Math.PI / 180);
+        sensitivity = config.multiplier || 1.0;
         onShotCallback = onShot;
         yaw = 0;
         pitch = 0;
@@ -304,8 +314,8 @@ const Game = (() => {
     function onMouseMove(e) {
         if (!isPointerLocked || !isRunning || !targetPosition) return;
 
-        yaw += e.movementX * sensitivity * BASE_TURN_RATE;
-        pitch -= e.movementY * sensitivity * BASE_TURN_RATE;
+        yaw += e.movementX * sensitivity * baseTurnRate;
+        pitch -= e.movementY * sensitivity * baseTurnRate;
         pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch));
 
         updateCameraRotation();
