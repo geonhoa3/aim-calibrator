@@ -261,7 +261,17 @@ const Game = (() => {
         updateCameraRotation();
 
         boundRequestPointerLock = function () {
-            renderer.domElement.requestPointerLock();
+            // unadjustedMovement: OS 마우스 가속 무시, raw input 사용
+            // 오버워치도 Raw Input을 쓰므로 동일한 조건
+            var promise = renderer.domElement.requestPointerLock({
+                unadjustedMovement: true
+            });
+            // 미지원 브라우저 폴백
+            if (promise && promise.catch) {
+                promise.catch(function () {
+                    renderer.domElement.requestPointerLock();
+                });
+            }
         };
         boundOnPointerLockChange = onPointerLockChange;
         boundOnMouseMove = onMouseMove;
@@ -276,7 +286,14 @@ const Game = (() => {
 
         setTimeout(function () {
             if (isRunning && renderer) {
-                renderer.domElement.requestPointerLock();
+                var promise = renderer.domElement.requestPointerLock({
+                    unadjustedMovement: true
+                });
+                if (promise && promise.catch) {
+                    promise.catch(function () {
+                        renderer.domElement.requestPointerLock();
+                    });
+                }
             }
         }, 200);
 
