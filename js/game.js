@@ -13,12 +13,12 @@ const Game = (() => {
     // Three.js 객체
     let scene, camera, renderer;
     let targetMesh, targetGlow, timerRing;
-    let groundGrid;
     let raycaster;
 
     // 게임 상태
     let isRunning = false;
     let isPointerLocked = false;
+    let initialized = false;
 
     // 카메라 회전 (radian)
     let yaw = 0;     // 좌우 회전
@@ -49,7 +49,30 @@ const Game = (() => {
     // 콜백
     let onShotCallback = null;
 
+    // 이벤트 핸들러 바인딩 (제거 시 참조 유지용)
+    let boundOnMouseMove = null;
+    let boundOnMouseDown = null;
+    let boundOnPointerLockChange = null;
+    let boundRequestPointerLock = null;
+
+    /**
+     * 초기화 - 가벼운 호환용 (아무것도 안 함)
+     * 실제 Three.js 초기화는 start() 에서 수행
+     */
     function init() {
+        // no-op: Three.js는 게임 화면이 보일 때 초기화
+    }
+
+    /**
+     * Three.js 씬/카메라/렌더러 초기화 (화면 표시 후 호출)
+     */
+    function initThree() {
+        if (initialized) {
+            // 이미 초기화됨 → 크기만 갱신
+            onResize();
+            return;
+        }
+
         // Scene
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x111118);
@@ -72,6 +95,8 @@ const Game = (() => {
         setupEnvironment();
 
         window.addEventListener('resize', onResize);
+
+        initialized = true;
     }
 
     function setupEnvironment() {
@@ -84,11 +109,11 @@ const Game = (() => {
         scene.add(directional);
 
         // 바닥 그리드
-        groundGrid = new THREE.GridHelper(100, 100, 0x1a1a2e, 0x1a1a2e);
+        const groundGrid = new THREE.GridHelper(100, 100, 0x1a1a2e, 0x1a1a2e);
         groundGrid.position.y = 0;
         scene.add(groundGrid);
 
-        // 바닥 면 (그리드 아래 반투명)
+        // 바닥 면
         const floorGeo = new THREE.PlaneGeometry(100, 100);
         const floorMat = new THREE.MeshStandardMaterial({
             color: 0x0a0a14,
@@ -101,6 +126,7 @@ const Game = (() => {
     }
 
     function onResize() {
+        if (!camera || !renderer) return;
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -115,27 +141,57 @@ const Game = (() => {
         spawnCount = 0;
         isRunning = true;
 
+        // Three.js 초기화 (게임 화면이 active된 후이므로 canvas 크기 OK)
+        initThree();
+
         // 카메라 초기 방향
         updateCameraRotation();
 
-        // 이벤트
-        renderer.domElement.addEventListener('click', requestPointerLock);
-        document.addEventListener('pointerlockchange', onPointerLockChange);
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mousedown', onMouseDown);
+        // 이벤트 바인딩
+        boundRequestPointerLock = () => { renderer.domElement.requestPointerLock(); };
+        boundOnPointerLockChange = onPointerLockChange;
+        boundOnMouseMove = onMouseMove;
+        boundOnMouseDown = onMouseDown;
 
-        requestPointerLock();
+        renderer.domElement.addEventListener('click', boundRequestPointerLock);
+        document.addEventListener('pointerlockchange', boundOnPointerLockChange);
+        document.addEventListener('mousemove', boundOnMouseMove);
+        document.addEventListener('mousedown', boundOnMouseDown);
+
+        // 약간의 딜레이 후 포인터락 요청 (화면 전환 완료 대기)
+        setTimeout(() => {
+            if (isRunning && renderer) {
+                renderer.domElement.requestPointerLock();
+            }
+        }, 100);
+
         spawnTarget();
         loop();
     }
 
     function stop() {
         isRunning = false;
-        document.exitPointerLock();
-        renderer.domElement.removeEventListener('click', requestPointerLock);
-        document.removeEventListener('pointerlockchange', onPointerLockChange);
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mousedown', onMouseDown);
+
+        try { document.exitPointerLock(); } catch (e) {}
+
+        if (renderer && boundRequestPointerLock) {
+            renderer.domElement.removeEventListener('click', boundRequestPointerLock);
+        }
+        if (boundOnPointerLockChange) {
+            document.removeEventListener('pointerlockchange', boundOnPointerLockChange);
+        }
+        if (boundOnMouseMove) {
+            document.removeEventListener('mousemove', boundOnMouseMove);
+        }
+        if (boundOnMouseDown) {
+            document.removeEventListener('mousedown', boundOnMouseDown);
+        }
+
+        // 크로스헤어 숨김
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) crosshair.style.display = 'none';
+
+        isPointerLocked = false;
 
         // 타겟 정리
         removeTarget();
@@ -145,14 +201,12 @@ const Game = (() => {
         sensitivity = sens;
     }
 
-    function requestPointerLock() {
-        renderer.domElement.requestPointerLock();
-    }
-
     function onPointerLockChange() {
         isPointerLocked = document.pointerLockElement === renderer.domElement;
         const crosshair = document.getElementById('crosshair');
-        crosshair.style.display = isPointerLocked ? 'block' : 'none';
+        if (crosshair) {
+            crosshair.style.display = isPointerLocked ? 'block' : 'none';
+        }
     }
 
     function onMouseMove(e) {
@@ -249,7 +303,10 @@ const Game = (() => {
             onShotCallback(shotData);
         }
 
-        spawnTarget();
+        // 게임이 아직 실행 중일 때만 다음 타겟 생성
+        if (isRunning) {
+            spawnTarget();
+        }
     }
 
     function removeTarget() {
@@ -378,9 +435,9 @@ const Game = (() => {
             timerRing.scale.set(scale, scale, scale);
 
             // 녹색 → 노란색 → 빨간색
-            const r = Math.round(255 * (1 - timeRatio));
-            const g = Math.round(255 * timeRatio);
-            timerRing.material.color.setRGB(r / 255, g / 255, 0);
+            const r = 1 - timeRatio;
+            const g = timeRatio;
+            timerRing.material.color.setRGB(r, g, 0);
             timerRing.material.opacity = 0.3 + timeRatio * 0.5;
         }
 
