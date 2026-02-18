@@ -3,26 +3,33 @@
  *
  * DPI 독립적 설계:
  *   - 게임 중에는 순수 "배율(multiplier)"로만 캘리브레이션
- *   - movementX/Y는 이미 OS에서 DPI 반영된 값
- *   - DPI 입력 없이 "이 사람에게 맞는 배율"을 찾음
  *   - 결과 화면에서 DPI 입력받아 오버워치 감도로 변환
  *
  * 종료 조건 (PID 수렴 방식):
  *   - 최소 MIN_ROUNDS 라운드 진행
  *   - 최근 STABLE_WINDOW회의 배율 변동폭이 STABLE_THRESHOLD 이하면 수렴
  *   - 최대 MAX_ROUNDS에 도달하면 강제 종료
+ *
+ * 3D 호환:
+ *   - trail 데이터는 angularDistance (radian) 사용
+ *   - 임계값도 radian 기준
  */
 
 const Calibration = (() => {
-    // 라운드 설정
-    const MIN_ROUNDS = 10;       // 최소 진행 라운드
-    const MAX_ROUNDS = 30;       // 최대 라운드 (무한루프 방지)
-    const STABLE_WINDOW = 5;     // 수렴 판정에 사용할 최근 라운드 수
-    const STABLE_THRESHOLD = 0.08; // 이 이하면 수렴 (배율 변동폭)
+    // 라운드 설정 (강화된 수렴 기준)
+    const MIN_ROUNDS = 12;
+    const MAX_ROUNDS = 30;
+    const STABLE_WINDOW = 8;
+    const STABLE_THRESHOLD = 0.05;
 
     // 배율 탐색 범위
     const MULT_MIN = 0.2;
     const MULT_MAX = 5.0;
+
+    // 분석 임계값 (radian 기준)
+    const OVERSHOOT_DIST = 0.08;    // ~4.6도, 오버슈팅 감지
+    const APPROACH_DIST = 0.05;     // ~2.9도, 타임아웃 시 접근 판정
+    const UNDERSHOOT_DIST = 0.03;   // ~1.7도, 언더슈팅 거리
 
     // 캘리브레이션 상태
     let currentRound = 0;
@@ -52,10 +59,6 @@ const Calibration = (() => {
         multHigh = MULT_MAX;
     }
 
-    /**
-     * 수렴 판정
-     * 최근 STABLE_WINDOW회의 배율이 모두 STABLE_THRESHOLD 범위 안에 있는지
-     */
     function isConverged() {
         if (shotHistory.length < STABLE_WINDOW) return false;
 
@@ -67,21 +70,16 @@ const Calibration = (() => {
         return (max - min) <= STABLE_THRESHOLD;
     }
 
-    /**
-     * 사격 데이터 분석 및 배율 조절
-     */
     function processShotData(shotData) {
         currentRound++;
 
         const analysis = analyzeShot(shotData);
         shotHistory.push({ ...shotData, analysis, multiplier: currentMultiplier });
 
-        // 수렴 여부 판정
         const converged = currentRound >= MIN_ROUNDS && isConverged();
         const maxReached = currentRound >= MAX_ROUNDS;
         const isComplete = converged || maxReached;
 
-        // 아직 안 끝났으면 배율 조절
         if (!isComplete) {
             adjustMultiplier(analysis);
         }
@@ -91,25 +89,31 @@ const Calibration = (() => {
             round: currentRound,
             analysis,
             isComplete,
-            converged // 수렴으로 끝났는지, 최대 라운드로 끝났는지 구분
+            converged
         };
     }
 
+    /**
+     * 사격 패턴 분석 (3D angularDistance 기반)
+     *
+     * trail[].angularDistance = 카메라 정면 ↔ 타겟 방향 각도 (radian)
+     * 0에 가까울수록 정조준
+     */
     function analyzeShot(shotData) {
+        // 타임아웃 처리
         if (shotData.timeout) {
             const trail = shotData.trail;
             let wasApproaching = false;
             if (trail.length >= 2) {
                 const last = trail[trail.length - 1];
-                const lastDist = Math.sqrt(last.screenDX ** 2 + last.screenDY ** 2);
-                wasApproaching = lastDist > 50;
+                wasApproaching = last.angularDistance > APPROACH_DIST;
             }
             return {
                 type: 'undershoot',
                 overshoots: 0,
                 corrections: 0,
                 score: wasApproaching ? -3 : -2,
-                closestDist: shotData.distance,
+                closestDist: shotData.angularDistance || 999,
                 timeout: true
             };
         }
@@ -125,21 +129,20 @@ const Calibration = (() => {
         let passedTarget = false;
 
         for (let i = 1; i < trail.length; i++) {
-            const prev = trail[i - 1];
-            const curr = trail[i];
-
-            const prevDist = Math.sqrt(prev.screenDX ** 2 + prev.screenDY ** 2);
-            const currDist = Math.sqrt(curr.screenDX ** 2 + curr.screenDY ** 2);
+            const prevDist = trail[i - 1].angularDistance;
+            const currDist = trail[i].angularDistance;
 
             closestDist = Math.min(closestDist, currDist);
 
-            if (prevDist < currDist && prevDist < 80) {
+            // 가까워지다가 멀어짐 = 오버슈팅
+            if (prevDist < currDist && prevDist < OVERSHOOT_DIST) {
                 if (!passedTarget) {
                     overshoots++;
                     passedTarget = true;
                 }
             }
 
+            // 다시 가까워짐 = 교정
             if (prevDist > currDist && passedTarget) {
                 corrections++;
                 passedTarget = false;
@@ -149,7 +152,7 @@ const Calibration = (() => {
         let score = 0;
         if (overshoots > 1) {
             score = Math.min(overshoots, 5);
-        } else if (corrections === 0 && shotData.distance > 30) {
+        } else if (corrections === 0 && shotData.angularDistance > UNDERSHOOT_DIST) {
             score = -2;
         }
 
@@ -159,8 +162,6 @@ const Calibration = (() => {
     }
 
     function adjustMultiplier(analysis) {
-        // adjustFactor: 라운드 진행에 따라 점진적으로 줄어듦
-        // MAX_ROUNDS 기준으로 계산 (수렴이 안 돼도 후반엔 미세 조절)
         const progress = currentRound / MAX_ROUNDS;
         const adjustFactor = 1 - progress * 0.7;
 

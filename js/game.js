@@ -1,67 +1,125 @@
 /**
- * game.js - Canvas 게임 엔진
+ * game.js - Three.js 3D 게임 엔진
  *
- * FPS 방식: 크로스헤어는 화면 중앙 고정, 마우스 움직이면 "시야(카메라)"가 이동
+ * FPS 시점: 카메라가 눈높이에서 yaw/pitch 회전
+ * 타겟은 3D 공간에 구체로 등장, 레이캐스팅으로 히트 판정
  *
- * 타겟 시간 제한:
- *   - 타겟 등장 후 최대 TARGET_LIFETIME ms 안에 사격해야 함
- *   - 시간 초과 → 자동 미스 처리 (onShot 콜백에 timeout: true)
- *   - 타이머 링이 줄어들며 남은 시간 표시
+ * calibration.js 인터페이스:
+ *   shotData.hit, .timeout, .angularDistance, .reactionTime, .trail[], .sensitivity
+ *   trail[].angularDistance = 카메라 정면 ↔ 타겟 방향 각도 (radian)
  */
 
 const Game = (() => {
-    // DOM
-    let canvas, ctx;
+    // Three.js 객체
+    let scene, camera, renderer;
+    let targetMesh, targetGlow, timerRing;
+    let groundGrid;
+    let raycaster;
 
     // 게임 상태
     let isRunning = false;
     let isPointerLocked = false;
 
-    // 카메라(시야) 위치
-    let viewX = 0;
-    let viewY = 0;
+    // 카메라 회전 (radian)
+    let yaw = 0;     // 좌우 회전
+    let pitch = 0;   // 상하 회전
 
-    // 타겟 (월드 좌표)
-    let target = null;
+    // 타겟 상태
+    let targetPosition = null; // THREE.Vector3
     let targetAppearTime = 0;
 
-    // 마우스 이동 기록
+    // 마우스 트레일
     let mouseTrail = [];
 
-    // 현재 감도
+    // 감도
     let sensitivity = 1.0;
+    const BASE_TURN_RATE = 0.003; // 기본 회전 속도 (rad/px)
 
     // 설정
-    const TARGET_RADIUS = 22;
-    const HIT_RADIUS = 28;
-    const CANVAS_BG = '#111';
-    const TARGET_LIFETIME = 1000; // 타겟 제한 시간 (ms)
+    const CAMERA_HEIGHT = 1.7;
+    const TARGET_RADIUS = 0.5;    // 월드 단위 (미터급)
+    const TARGET_LIFETIME = 1000; // ms
+    const PITCH_LIMIT = 85 * Math.PI / 180; // ±85도
+
+    // 거리 패턴
+    let spawnCount = 0;
+    const DIST_NEAR = { min: 5, max: 12 };
+    const DIST_FAR = { min: 15, max: 30 };
 
     // 콜백
     let onShotCallback = null;
 
     function init() {
-        canvas = document.getElementById('game-canvas');
-        ctx = canvas.getContext('2d');
-        resize();
-        window.addEventListener('resize', resize);
+        // Scene
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111118);
+        scene.fog = new THREE.Fog(0x111118, 30, 80);
+
+        // Camera (FOV 103 = 오버워치 기본)
+        camera = new THREE.PerspectiveCamera(103, window.innerWidth / window.innerHeight, 0.1, 200);
+        camera.position.set(0, CAMERA_HEIGHT, 0);
+
+        // Renderer
+        const canvas = document.getElementById('game-canvas');
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+        // Raycaster
+        raycaster = new THREE.Raycaster();
+
+        // 환경 구성
+        setupEnvironment();
+
+        window.addEventListener('resize', onResize);
     }
 
-    function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+    function setupEnvironment() {
+        // 조명
+        const ambient = new THREE.AmbientLight(0x404060, 0.8);
+        scene.add(ambient);
+
+        const directional = new THREE.DirectionalLight(0xffffff, 1.0);
+        directional.position.set(10, 20, 10);
+        scene.add(directional);
+
+        // 바닥 그리드
+        groundGrid = new THREE.GridHelper(100, 100, 0x1a1a2e, 0x1a1a2e);
+        groundGrid.position.y = 0;
+        scene.add(groundGrid);
+
+        // 바닥 면 (그리드 아래 반투명)
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({
+            color: 0x0a0a14,
+            roughness: 0.9
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = -0.01;
+        scene.add(floor);
+    }
+
+    function onResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
     function start(sens, onShot) {
         sensitivity = sens;
         onShotCallback = onShot;
-        viewX = 0;
-        viewY = 0;
+        yaw = 0;
+        pitch = 0;
         mouseTrail = [];
         spawnCount = 0;
         isRunning = true;
 
-        canvas.addEventListener('click', requestPointerLock);
+        // 카메라 초기 방향
+        updateCameraRotation();
+
+        // 이벤트
+        renderer.domElement.addEventListener('click', requestPointerLock);
         document.addEventListener('pointerlockchange', onPointerLockChange);
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mousedown', onMouseDown);
@@ -74,10 +132,13 @@ const Game = (() => {
     function stop() {
         isRunning = false;
         document.exitPointerLock();
-        canvas.removeEventListener('click', requestPointerLock);
+        renderer.domElement.removeEventListener('click', requestPointerLock);
         document.removeEventListener('pointerlockchange', onPointerLockChange);
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mousedown', onMouseDown);
+
+        // 타겟 정리
+        removeTarget();
     }
 
     function setSensitivity(sens) {
@@ -85,63 +146,99 @@ const Game = (() => {
     }
 
     function requestPointerLock() {
-        canvas.requestPointerLock();
+        renderer.domElement.requestPointerLock();
     }
 
     function onPointerLockChange() {
-        isPointerLocked = document.pointerLockElement === canvas;
+        isPointerLocked = document.pointerLockElement === renderer.domElement;
         const crosshair = document.getElementById('crosshair');
         crosshair.style.display = isPointerLocked ? 'block' : 'none';
     }
 
     function onMouseMove(e) {
-        if (!isPointerLocked || !isRunning || !target) return;
+        if (!isPointerLocked || !isRunning || !targetPosition) return;
 
-        viewX += e.movementX * sensitivity;
-        viewY += e.movementY * sensitivity;
+        // 마우스 이동 → 카메라 회전
+        yaw -= e.movementX * sensitivity * BASE_TURN_RATE;
+        pitch -= e.movementY * sensitivity * BASE_TURN_RATE;
 
-        const screenDX = target.x - viewX;
-        const screenDY = target.y - viewY;
+        // Pitch 클램핑
+        pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch));
 
+        updateCameraRotation();
+
+        // 타겟까지 각도 거리 기록
+        const angDist = getAngularDistance();
         mouseTrail.push({
             time: performance.now(),
-            screenDX, screenDY,
+            angularDistance: angDist,
             rawDX: e.movementX,
             rawDY: e.movementY,
-            viewX, viewY
+            yaw, pitch
         });
     }
 
     function onMouseDown(e) {
-        if (!isPointerLocked || !isRunning || !target) return;
+        if (!isPointerLocked || !isRunning || !targetPosition) return;
         if (e.button !== 0) return;
-
-        fireShot(false); // timeout = false (유저가 직접 클릭)
+        fireShot(false);
     }
 
     /**
-     * 사격 처리 (클릭 또는 타임아웃)
-     * @param {boolean} isTimeout - 시간 초과로 인한 자동 미스인지
+     * 카메라 방향 업데이트 (yaw/pitch → lookAt 방향)
+     */
+    function updateCameraRotation() {
+        const dir = new THREE.Vector3(
+            Math.sin(yaw) * Math.cos(pitch),
+            Math.sin(pitch),
+            -Math.cos(yaw) * Math.cos(pitch)
+        );
+        camera.lookAt(
+            camera.position.x + dir.x,
+            camera.position.y + dir.y,
+            camera.position.z + dir.z
+        );
+    }
+
+    /**
+     * 카메라 정면 방향 ↔ 타겟 방향 각도 (radian)
+     */
+    function getAngularDistance() {
+        if (!targetPosition) return 999;
+
+        const camDir = new THREE.Vector3();
+        camera.getWorldDirection(camDir);
+
+        const toTarget = new THREE.Vector3()
+            .subVectors(targetPosition, camera.position)
+            .normalize();
+
+        return camDir.angleTo(toTarget);
+    }
+
+    /**
+     * 사격 처리
      */
     function fireShot(isTimeout) {
-        if (!target) return;
+        if (!targetPosition) return;
 
         const shotTime = performance.now();
         const reactionTime = shotTime - targetAppearTime;
+        const angularDistance = getAngularDistance();
 
-        const dx = target.x - viewX;
-        const dy = target.y - viewY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const isHit = !isTimeout && distance <= HIT_RADIUS;
+        // 히트 판정: 레이캐스팅 (타임아웃이면 무조건 미스)
+        let isHit = false;
+        if (!isTimeout && targetMesh) {
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObject(targetMesh);
+            isHit = intersects.length > 0;
+        }
 
         const shotData = {
             hit: isHit,
             timeout: isTimeout,
-            distance,
+            angularDistance,
             reactionTime: isTimeout ? TARGET_LIFETIME : reactionTime,
-            targetX: target.x,
-            targetY: target.y,
-            viewX, viewY,
             trail: [...mouseTrail],
             sensitivity
         };
@@ -155,157 +252,145 @@ const Game = (() => {
         spawnTarget();
     }
 
-    // 거리 패턴: 가까운/먼 타겟 번갈아 등장
-    let spawnCount = 0;
-    const DIST_NEAR = { min: 120, max: 250 };  // 가까운: flick shot
-    const DIST_FAR  = { min: 350, max: 600 };  // 먼: 대각 이동
+    function removeTarget() {
+        if (targetMesh) {
+            scene.remove(targetMesh);
+            targetMesh.geometry.dispose();
+            targetMesh.material.dispose();
+            targetMesh = null;
+        }
+        if (targetGlow) {
+            scene.remove(targetGlow);
+            targetGlow.geometry.dispose();
+            targetGlow.material.dispose();
+            targetGlow = null;
+        }
+        if (timerRing) {
+            scene.remove(timerRing);
+            timerRing.geometry.dispose();
+            timerRing.material.dispose();
+            timerRing = null;
+        }
+        targetPosition = null;
+    }
 
     function spawnTarget() {
-        // 번갈아가며 가까운/먼 타겟
+        removeTarget();
+
+        // 거리 패턴: 가까운/먼 번갈아
         const isNear = spawnCount % 2 === 0;
         const range = isNear ? DIST_NEAR : DIST_FAR;
         spawnCount++;
 
-        const angle = Math.random() * Math.PI * 2;
         const dist = range.min + Math.random() * (range.max - range.min);
 
-        target = {
-            x: viewX + Math.cos(angle) * dist,
-            y: viewY + Math.sin(angle) * dist
-        };
+        // 현재 시선 기준 랜덤 각도 오프셋
+        const yawOffset = (Math.random() - 0.5) * Math.PI * 0.8;  // ±72도
+        const pitchOffset = (Math.random() - 0.5) * Math.PI * 0.3; // ±27도
+
+        const targetYaw = yaw + yawOffset;
+        const targetPitch = Math.max(-0.3, Math.min(0.5, pitch + pitchOffset)); // 너무 아래/위 방지
+
+        // 월드 좌표 계산
+        const x = camera.position.x + Math.sin(targetYaw) * Math.cos(targetPitch) * dist;
+        const y = CAMERA_HEIGHT + Math.sin(targetPitch) * dist;
+        const z = camera.position.z - Math.cos(targetYaw) * Math.cos(targetPitch) * dist;
+
+        // 최소 높이 제한 (바닥 아래 방지)
+        const clampedY = Math.max(TARGET_RADIUS + 0.1, y);
+
+        targetPosition = new THREE.Vector3(x, clampedY, z);
+
+        // 타겟 구체
+        const geo = new THREE.SphereGeometry(TARGET_RADIUS, 24, 24);
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0xff3c3c,
+            emissive: 0xff1111,
+            emissiveIntensity: 0.3,
+            roughness: 0.3,
+            metalness: 0.1
+        });
+        targetMesh = new THREE.Mesh(geo, mat);
+        targetMesh.position.copy(targetPosition);
+        scene.add(targetMesh);
+
+        // 글로우 링
+        const glowGeo = new THREE.RingGeometry(TARGET_RADIUS * 1.3, TARGET_RADIUS * 1.6, 32);
+        const glowMat = new THREE.MeshBasicMaterial({
+            color: 0xff3c3c,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.DoubleSide
+        });
+        targetGlow = new THREE.Mesh(glowGeo, glowMat);
+        targetGlow.position.copy(targetPosition);
+        scene.add(targetGlow);
+
+        // 타이머 링 (TorusGeometry)
+        const torusGeo = new THREE.TorusGeometry(TARGET_RADIUS * 1.8, 0.04, 8, 64);
+        const torusMat = new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            transparent: true,
+            opacity: 0.8
+        });
+        timerRing = new THREE.Mesh(torusGeo, torusMat);
+        timerRing.position.copy(targetPosition);
+        scene.add(timerRing);
+
         targetAppearTime = performance.now();
     }
 
     function loop() {
         if (!isRunning) return;
 
-        // 타겟 시간 초과 체크
-        if (target && isPointerLocked) {
+        // 타임아웃 체크
+        if (targetPosition && isPointerLocked) {
             const elapsed = performance.now() - targetAppearTime;
             if (elapsed >= TARGET_LIFETIME) {
-                fireShot(true); // 타임아웃 미스
+                fireShot(true);
             }
         }
 
-        draw();
+        updateTargetVisuals();
+        renderer.render(scene, camera);
         requestAnimationFrame(loop);
     }
 
-    function draw() {
-        const w = canvas.width;
-        const h = canvas.height;
-        const cx = w / 2;
-        const cy = h / 2;
-
-        // 배경
-        ctx.fillStyle = CANVAS_BG;
-        ctx.fillRect(0, 0, w, h);
-
-        // 격자 (시야 이동에 따라 움직임)
-        ctx.strokeStyle = '#1a1a2a';
-        ctx.lineWidth = 1;
-        const gridSize = 80;
-        const gridOffsetX = (-viewX % gridSize + gridSize) % gridSize;
-        const gridOffsetY = (-viewY % gridSize + gridSize) % gridSize;
-
-        for (let x = gridOffsetX; x < w; x += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, h);
-            ctx.stroke();
-        }
-        for (let y = gridOffsetY; y < h; y += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(w, y);
-            ctx.stroke();
-        }
-
-        // 타겟 그리기
-        if (target) {
-            const screenTX = cx + (target.x - viewX);
-            const screenTY = cy + (target.y - viewY);
-            const elapsed = performance.now() - targetAppearTime;
-            const timeRatio = Math.max(0, 1 - elapsed / TARGET_LIFETIME); // 1→0 줄어듦
-
-            if (screenTX > -50 && screenTX < w + 50 &&
-                screenTY > -50 && screenTY < h + 50) {
-
-                // === 타이머 링 (남은 시간 표시) ===
-                const timerRadius = TARGET_RADIUS + 12;
-                // 색상: 녹색 → 노란색 → 빨간색
-                const r = Math.round(255 * (1 - timeRatio));
-                const g = Math.round(255 * timeRatio);
-                const timerColor = `rgba(${r}, ${g}, 0, 0.7)`;
-
-                ctx.beginPath();
-                // -90도(12시)에서 시작, 시계방향으로 줄어듦
-                ctx.arc(screenTX, screenTY, timerRadius,
-                    -Math.PI / 2,
-                    -Math.PI / 2 + Math.PI * 2 * timeRatio,
-                    false
-                );
-                ctx.strokeStyle = timerColor;
-                ctx.lineWidth = 3;
-                ctx.lineCap = 'round';
-                ctx.stroke();
-
-                // === 타겟 본체 ===
-                // 시간 적을수록 살짝 투명해짐
-                const alpha = 0.5 + timeRatio * 0.5; // 1.0 → 0.5
-
-                ctx.beginPath();
-                ctx.arc(screenTX, screenTY, TARGET_RADIUS, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255, 60, 60, ${alpha})`;
-                ctx.fill();
-
-                // 내부 링
-                ctx.beginPath();
-                ctx.arc(screenTX, screenTY, TARGET_RADIUS * 0.55, 0, Math.PI * 2);
-                ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.4})`;
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-
-                // 중앙 점
-                ctx.beginPath();
-                ctx.arc(screenTX, screenTY, 3, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-                ctx.fill();
-
-            } else {
-                drawOffScreenIndicator(cx, cy, screenTX, screenTY, w, h, timeRatio);
-            }
-        }
-    }
-
     /**
-     * 타겟 화면 밖 방향 표시 (남은 시간 색상 반영)
+     * 타겟 시각 업데이트 (타이머, 빌보딩)
      */
-    function drawOffScreenIndicator(cx, cy, tx, ty, w, h, timeRatio) {
-        const dx = tx - cx;
-        const dy = ty - cy;
-        const angle = Math.atan2(dy, dx);
+    function updateTargetVisuals() {
+        if (!targetPosition || !targetMesh) return;
 
-        const margin = 40;
-        const indicatorX = cx + Math.cos(angle) * (Math.min(w, h) / 2 - margin);
-        const indicatorY = cy + Math.sin(angle) * (Math.min(w, h) / 2 - margin);
+        const elapsed = performance.now() - targetAppearTime;
+        const timeRatio = Math.max(0, 1 - elapsed / TARGET_LIFETIME);
 
-        const r = Math.round(255 * (1 - timeRatio));
-        const g = Math.round(255 * timeRatio);
+        // 글로우 링: 항상 카메라를 바라봄 (빌보딩)
+        if (targetGlow) {
+            targetGlow.lookAt(camera.position);
+            targetGlow.material.opacity = 0.15 + timeRatio * 0.15;
+        }
 
-        ctx.save();
-        ctx.translate(indicatorX, indicatorY);
-        ctx.rotate(angle);
+        // 타이머 링: 색상 변화 + 스케일 축소
+        if (timerRing) {
+            timerRing.lookAt(camera.position);
+            const scale = timeRatio;
+            timerRing.scale.set(scale, scale, scale);
 
-        ctx.beginPath();
-        ctx.moveTo(12, 0);
-        ctx.lineTo(-6, -7);
-        ctx.lineTo(-6, 7);
-        ctx.closePath();
-        ctx.fillStyle = `rgba(${r}, ${g}, 0, 0.7)`;
-        ctx.fill();
+            // 녹색 → 노란색 → 빨간색
+            const r = Math.round(255 * (1 - timeRatio));
+            const g = Math.round(255 * timeRatio);
+            timerRing.material.color.setRGB(r / 255, g / 255, 0);
+            timerRing.material.opacity = 0.3 + timeRatio * 0.5;
+        }
 
-        ctx.restore();
+        // 타겟 본체: 시간 적을수록 살짝 투명
+        if (targetMesh) {
+            const alpha = 0.6 + timeRatio * 0.4;
+            targetMesh.material.opacity = alpha;
+            targetMesh.material.transparent = alpha < 1;
+            targetMesh.material.emissiveIntensity = 0.2 + timeRatio * 0.3;
+        }
     }
 
     return { init, start, stop, setSensitivity };
