@@ -8,20 +8,42 @@
 (function () {
     let selectedDPI = 800;
 
+    console.log('[main] 초기화 시작');
+    console.log('[main] THREE 존재:', typeof THREE !== 'undefined');
+    console.log('[main] Game 존재:', typeof Game !== 'undefined');
+    console.log('[main] Calibration 존재:', typeof Calibration !== 'undefined');
+    console.log('[main] Result 존재:', typeof Result !== 'undefined');
+
     function showScreen(screenId) {
         document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
         document.getElementById(screenId).classList.add('active');
+        console.log('[main] 화면 전환:', screenId);
     }
 
-    Game.init();
+    // Game.init()은 이제 no-op
+    if (typeof Game !== 'undefined') {
+        Game.init();
+    }
 
     // === 시작 화면 ===
-    document.getElementById('btn-start').addEventListener('click', () => {
-        Calibration.init();
-        updateHUD(1, 1.0);
-        showScreen('screen-game');
-        Game.start(1.0, onShot);
-    });
+    const btnStart = document.getElementById('btn-start');
+    if (btnStart) {
+        console.log('[main] btn-start 이벤트 등록 완료');
+        btnStart.addEventListener('click', () => {
+            console.log('[main] 캘리브레이션 시작 버튼 클릭');
+            try {
+                Calibration.init();
+                updateHUD(1, 1.0);
+                showScreen('screen-game');
+                Game.start(1.0, onShot);
+                console.log('[main] Game.start() 완료');
+            } catch (e) {
+                console.error('[main] 시작 오류:', e);
+            }
+        });
+    } else {
+        console.error('[main] btn-start 요소를 찾을 수 없음');
+    }
 
     // === 게임 중 사격 콜백 ===
     function onShot(shotData) {
@@ -94,4 +116,6 @@
     document.getElementById('btn-retry').addEventListener('click', () => {
         showScreen('screen-start');
     });
+
+    console.log('[main] 초기화 완료');
 })();

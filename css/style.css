@@ -30,6 +30,10 @@ body {
     justify-content: center;
 }
 
+#screen-game.active {
+    display: block;
+}
+
 /* ===== Start Screen ===== */
 .start-container {
     text-align: center;
