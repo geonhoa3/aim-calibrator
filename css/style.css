@@ -139,6 +139,8 @@ body {
 
 #game-canvas {
     display: block;
+    width: 100vw !important;
+    height: 100vh !important;
 }
 
 #game-hud {
