@@ -333,11 +333,20 @@ const Game = (() => {
 
         var dist = range.min + Math.random() * (range.max - range.min);
 
-        var yawOffset = (Math.random() - 0.5) * Math.PI * 0.8;
-        var pitchOffset = (Math.random() - 0.5) * Math.PI * 0.3;
+        // FOV 103도 기준, 화면 안쪽에서만 출현
+        // 좌우 ±35도, 상하 ±20도 (화면 가장자리 안쪽 여유)
+        var yawOffset = (Math.random() - 0.5) * 2 * (35 * Math.PI / 180);
+        var pitchOffset = (Math.random() - 0.5) * 2 * (20 * Math.PI / 180);
+
+        // 최소 각도 보장 (너무 정 가운데에 나오지 않도록)
+        if (Math.abs(yawOffset) < 8 * Math.PI / 180) {
+            yawOffset = (yawOffset >= 0 ? 1 : -1) * (8 + Math.random() * 27) * Math.PI / 180;
+        }
 
         var targetYaw = yaw + yawOffset;
-        var targetPitch = Math.max(-0.3, Math.min(0.5, pitch + pitchOffset));
+        var targetPitch = pitch + pitchOffset;
+        // pitch 전체 범위 클램프
+        targetPitch = Math.max(-0.3, Math.min(0.5, targetPitch));
 
         var x = camera.position.x + Math.sin(targetYaw) * Math.cos(targetPitch) * dist;
         var y = CAMERA_HEIGHT + Math.sin(targetPitch) * dist;
