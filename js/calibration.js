@@ -6,10 +6,19 @@
  *   - movementX/Y는 이미 OS에서 DPI 반영된 값
  *   - DPI 입력 없이 "이 사람에게 맞는 배율"을 찾음
  *   - 결과 화면에서 DPI 입력받아 오버워치 감도로 변환
+ *
+ * 종료 조건 (PID 수렴 방식):
+ *   - 최소 MIN_ROUNDS 라운드 진행
+ *   - 최근 STABLE_WINDOW회의 배율 변동폭이 STABLE_THRESHOLD 이하면 수렴
+ *   - 최대 MAX_ROUNDS에 도달하면 강제 종료
  */
 
 const Calibration = (() => {
-    const TOTAL_ROUNDS = 15;
+    // 라운드 설정
+    const MIN_ROUNDS = 10;       // 최소 진행 라운드
+    const MAX_ROUNDS = 30;       // 최대 라운드 (무한루프 방지)
+    const STABLE_WINDOW = 5;     // 수렴 판정에 사용할 최근 라운드 수
+    const STABLE_THRESHOLD = 0.08; // 이 이하면 수렴 (배율 변동폭)
 
     // 배율 탐색 범위
     const MULT_MIN = 0.2;
@@ -17,18 +26,13 @@ const Calibration = (() => {
 
     // 캘리브레이션 상태
     let currentRound = 0;
-    let currentMultiplier = 1.0; // 시작 배율
+    let currentMultiplier = 1.0;
     let shotHistory = [];
 
     // 이진탐색 범위
     let multLow = MULT_MIN;
     let multHigh = MULT_MAX;
 
-    /**
-     * 배율 → 오버워치 감도 변환
-     * 배율 1.0 = DPI 800 기준 감도 5 정도의 느낌
-     * OW감도 = 배율 × 기준감도 × (기준DPI / 유저DPI)
-     */
     function multiplierToOWSens(multiplier, dpi) {
         const baseSens = 5;
         const baseDPI = 800;
@@ -36,10 +40,6 @@ const Calibration = (() => {
         return Math.round(owSens * 100) / 100;
     }
 
-    /**
-     * cm/360 계산
-     * 오버워치: cm/360 = (360 × 2.54) / (DPI × 감도 × 0.0066)
-     */
     function calcCm360(owSens, dpi) {
         return (360 * 2.54) / (dpi * owSens * 0.0066);
     }
@@ -53,6 +53,21 @@ const Calibration = (() => {
     }
 
     /**
+     * 수렴 판정
+     * 최근 STABLE_WINDOW회의 배율이 모두 STABLE_THRESHOLD 범위 안에 있는지
+     */
+    function isConverged() {
+        if (shotHistory.length < STABLE_WINDOW) return false;
+
+        const recent = shotHistory.slice(-STABLE_WINDOW);
+        const multipliers = recent.map(s => s.multiplier);
+        const min = Math.min(...multipliers);
+        const max = Math.max(...multipliers);
+
+        return (max - min) <= STABLE_THRESHOLD;
+    }
+
+    /**
      * 사격 데이터 분석 및 배율 조절
      */
     function processShotData(shotData) {
@@ -61,24 +76,26 @@ const Calibration = (() => {
         const analysis = analyzeShot(shotData);
         shotHistory.push({ ...shotData, analysis, multiplier: currentMultiplier });
 
-        if (currentRound < TOTAL_ROUNDS) {
+        // 수렴 여부 판정
+        const converged = currentRound >= MIN_ROUNDS && isConverged();
+        const maxReached = currentRound >= MAX_ROUNDS;
+        const isComplete = converged || maxReached;
+
+        // 아직 안 끝났으면 배율 조절
+        if (!isComplete) {
             adjustMultiplier(analysis);
         }
 
         return {
             nextMultiplier: currentMultiplier,
             round: currentRound,
-            total: TOTAL_ROUNDS,
             analysis,
-            isComplete: currentRound >= TOTAL_ROUNDS
+            isComplete,
+            converged // 수렴으로 끝났는지, 최대 라운드로 끝났는지 구분
         };
     }
 
-    /**
-     * 사격 패턴 분석 (FPS 카메라 방식)
-     */
     function analyzeShot(shotData) {
-        // 타임아웃 = 1초 안에 도달 못함 = 강한 언더슈팅
         if (shotData.timeout) {
             const trail = shotData.trail;
             let wasApproaching = false;
@@ -141,11 +158,10 @@ const Calibration = (() => {
         return { type, overshoots, corrections, score, closestDist, timeout: false };
     }
 
-    /**
-     * 배율 자동 조절 (수정된 이진탐색)
-     */
     function adjustMultiplier(analysis) {
-        const progress = currentRound / TOTAL_ROUNDS;
+        // adjustFactor: 라운드 진행에 따라 점진적으로 줄어듦
+        // MAX_ROUNDS 기준으로 계산 (수렴이 안 돼도 후반엔 미세 조절)
+        const progress = currentRound / MAX_ROUNDS;
         const adjustFactor = 1 - progress * 0.7;
 
         if (analysis.type === 'overshoot') {
@@ -158,20 +174,15 @@ const Calibration = (() => {
             currentMultiplier = Math.min(multHigh, currentMultiplier + diff);
         }
 
-        // 소수점 2자리
         currentMultiplier = Math.round(currentMultiplier * 100) / 100;
         currentMultiplier = Math.max(MULT_MIN, Math.min(MULT_MAX, currentMultiplier));
     }
 
-    /**
-     * 최종 결과 생성 (DPI를 받아서 오버워치 감도로 변환)
-     */
     function getResult(dpi) {
         const owSens = multiplierToOWSens(currentMultiplier, dpi);
         const edpi = Math.round(dpi * owSens);
         const cm360 = Math.round(calcCm360(owSens, dpi) * 10) / 10;
 
-        // 사격 통계
         const hits = shotHistory.filter(s => s.hit).length;
         const timeouts = shotHistory.filter(s => s.timeout).length;
         const validShots = shotHistory.filter(s => !s.timeout);
@@ -192,6 +203,7 @@ const Calibration = (() => {
             dpi,
             edpi,
             cm360,
+            totalRounds: shotHistory.length,
             stats: {
                 totalShots: shotHistory.length,
                 hits,
