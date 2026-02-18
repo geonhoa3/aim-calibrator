@@ -219,7 +219,7 @@ const Game = (() => {
     function onMouseMove(e) {
         if (!isPointerLocked || !isRunning || !targetPosition) return;
 
-        yaw -= e.movementX * sensitivity * BASE_TURN_RATE;
+        yaw += e.movementX * sensitivity * BASE_TURN_RATE;
         pitch -= e.movementY * sensitivity * BASE_TURN_RATE;
         pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch));
 
