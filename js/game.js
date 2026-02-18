@@ -4,6 +4,16 @@
  * 타겟: 오버워치 봇 실루엣 (머리+몸통+다리 조합)
  * 환경: 밝은 연습장 느낌
  * 크로스헤어: CSS 기반 오버워치 스타일 (별도 #crosshair)
+ *
+ * 감도 매칭:
+ *   OW 감도 공식 = 0.0066 deg/count/sens
+ *   baseTurnRate = owSens × 0.0066 × (π/180) rad/count
+ *   unadjustedMovement: true 로 OS 가속 제거
+ *
+ * 점수제:
+ *   - 타겟 타임아웃 없음 (클릭할 때까지 유지)
+ *   - 빠른 클릭 시 속도 보너스 (1초 이내)
+ *   - 헤드샷 보너스 (머리 부위 히트)
  */
 
 const Game = (() => {
@@ -32,10 +42,28 @@ const Game = (() => {
     let sensitivity = 1.0;     // 캘리브레이션 배율 (1.0 = 현재 감도 그대로)
     let baseTurnRate = 0.003;  // DPI × OW감도 기반 계산값 (rad/px)
 
+    // 점수
+    let score = 0;
+    let combo = 0;
+    let lastHitTime = 0;
+
+    // 헤드샷용 머리 메시 참조
+    let headMeshRef = null;
+
     // 설정
     const CAMERA_HEIGHT = 1.7;
-    const TARGET_LIFETIME = 1000;
     const PITCH_LIMIT = 85 * Math.PI / 180;
+
+    // 점수 설정
+    const BASE_SCORE = 100;         // 바디샷 기본 점수
+    const HEADSHOT_BONUS = 150;     // 헤드샷 추가 점수
+    const SPEED_THRESHOLDS = [      // 속도 보너스 구간
+        { time: 500,  bonus: 200 },  // 0.5초 이내: +200
+        { time: 1000, bonus: 100 },  // 1초 이내: +100
+        { time: 2000, bonus: 50 },   // 2초 이내: +50
+    ];
+    const COMBO_MULTIPLIER = 0.1;   // 콤보당 10% 추가
+    const MISS_PENALTY = -50;       // 미스 페널티
 
     // 봇 크기 (오버워치 연습장 봇 비율)
     const BOT_HEIGHT = 1.8;       // 전체 높이
@@ -56,6 +84,9 @@ const Game = (() => {
     let boundOnMouseDown = null;
     let boundOnPointerLockChange = null;
     let boundRequestPointerLock = null;
+
+    // 히트 이펙트
+    let hitEffects = [];
 
     function init() {}
 
@@ -246,19 +277,30 @@ const Game = (() => {
      * @param {Function} onShot - 사격 콜백
      */
     function start(config, onShot) {
-        // OW 감도 공식: 1px 이동 시 회전량 = owSens × 0.0066도
-        // rad/px = owSens × 0.0066 × (π/180)
+        // OW 감도 공식: 0.0066 deg/count/sens
+        // 1 raw count 이동 시 회전량 = owSens × 0.0066도 = owSens × 0.0066 × (π/180) rad
+        //
+        // browser movementX (unadjustedMovement: true) = raw hardware counts
+        // 따라서: rotation_rad = movementX × owSens × 0.0066 × (π/180)
         baseTurnRate = config.owSens * 0.0066 * (Math.PI / 180);
+
         sensitivity = config.multiplier || 1.0;
         onShotCallback = onShot;
         yaw = 0;
         pitch = 0;
         mouseTrail = [];
         spawnCount = 0;
+        score = 0;
+        combo = 0;
+        lastHitTime = 0;
+        hitEffects = [];
         isRunning = true;
 
         initThree();
         updateCameraRotation();
+
+        // 점수 HUD 초기화
+        updateScoreHUD();
 
         boundRequestPointerLock = function () {
             // unadjustedMovement: OS 마우스 가속 무시, raw input 사용
@@ -269,6 +311,7 @@ const Game = (() => {
             // 미지원 브라우저 폴백
             if (promise && promise.catch) {
                 promise.catch(function () {
+                    console.warn('[Game] unadjustedMovement not supported, falling back to standard pointer lock');
                     renderer.domElement.requestPointerLock();
                 });
             }
@@ -322,6 +365,10 @@ const Game = (() => {
         sensitivity = sens;
     }
 
+    function getScore() {
+        return score;
+    }
+
     function onPointerLockChange() {
         isPointerLocked = document.pointerLockElement === renderer.domElement;
         var crosshair = document.getElementById('crosshair');
@@ -351,7 +398,7 @@ const Game = (() => {
     function onMouseDown(e) {
         if (!isPointerLocked || !isRunning || !targetPosition) return;
         if (e.button !== 0) return;
-        fireShot(false);
+        fireShot();
     }
 
     function updateCameraRotation() {
@@ -406,11 +453,13 @@ const Game = (() => {
         var leftLeg = new THREE.Mesh(legGeo, darkMat);
         leftLeg.position.set(-0.15, 0.35, 0);
         leftLeg.castShadow = true;
+        leftLeg.userData.part = 'body';
         group.add(leftLeg);
 
         var rightLeg = new THREE.Mesh(legGeo, darkMat);
         rightLeg.position.set(0.15, 0.35, 0);
         rightLeg.castShadow = true;
+        rightLeg.userData.part = 'body';
         group.add(rightLeg);
 
         // 몸통 (메인 바디 - 넓은 박스)
@@ -418,6 +467,7 @@ const Game = (() => {
         var body = new THREE.Mesh(bodyGeo, bodyMat);
         body.position.set(0, 1.05, 0);
         body.castShadow = true;
+        body.userData.part = 'body';
         group.add(body);
 
         // 어깨 (넓은 판)
@@ -425,26 +475,30 @@ const Game = (() => {
         var shoulder = new THREE.Mesh(shoulderGeo, bodyMat);
         shoulder.position.set(0, 1.42, 0);
         shoulder.castShadow = true;
+        shoulder.userData.part = 'body';
         group.add(shoulder);
 
         // 목
         var neckGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.12, 8);
         var neck = new THREE.Mesh(neckGeo, darkMat);
         neck.position.set(0, 1.54, 0);
+        neck.userData.part = 'body';
         group.add(neck);
 
-        // 머리 (약간 납작한 구체)
+        // 머리 (약간 납작한 구체) - 헤드샷 판정용
         var headGeo = new THREE.SphereGeometry(BOT_HEAD_RADIUS, 16, 12);
         var head = new THREE.Mesh(headGeo, bodyMat);
         head.position.set(0, 1.72, 0);
         head.scale.set(1, 0.9, 0.85);
         head.castShadow = true;
+        head.userData.part = 'head';  // 헤드샷 판정용 태그
         group.add(head);
 
         // 눈 (발광 라인 - 오버워치 봇 특유의 빛나는 바이저)
         var visorGeo = new THREE.BoxGeometry(0.28, 0.04, 0.05);
         var visor = new THREE.Mesh(visorGeo, glowMat);
         visor.position.set(0, 1.74, 0.17);
+        visor.userData.part = 'head';  // 바이저도 헤드샷
         group.add(visor);
 
         // 가슴 중앙 표적 (빛나는 원)
@@ -455,6 +509,7 @@ const Game = (() => {
         });
         var chestTarget = new THREE.Mesh(targetRingGeo, targetRingMat);
         chestTarget.position.set(0, 1.05, 0.16);
+        chestTarget.userData.part = 'body';
         group.add(chestTarget);
 
         // 발판 (오버워치 연습장 봇 아래 원형 받침대)
@@ -467,12 +522,13 @@ const Game = (() => {
         var base = new THREE.Mesh(baseCyl, baseMat);
         base.position.set(0, 0.04, 0);
         base.receiveShadow = true;
+        base.userData.part = 'body';
         group.add(base);
 
         return group;
     }
 
-    function fireShot(isTimeout) {
+    function fireShot() {
         if (!targetPosition) return;
 
         var shotTime = performance.now();
@@ -480,26 +536,133 @@ const Game = (() => {
         var angularDistance = getAngularDistance();
 
         var isHit = false;
-        if (!isTimeout && targetGroup) {
+        var isHeadshot = false;
+
+        if (targetGroup) {
             raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
             // 봇의 모든 자식 메시에 대해 레이캐스트
             var intersects = raycaster.intersectObjects(targetGroup.children, true);
-            isHit = intersects.length > 0;
+            if (intersects.length > 0) {
+                isHit = true;
+                // 첫 번째 히트 오브젝트의 part 확인
+                for (var i = 0; i < intersects.length; i++) {
+                    var hitObj = intersects[i].object;
+                    if (hitObj.userData && hitObj.userData.part === 'head') {
+                        isHeadshot = true;
+                        break;
+                    }
+                }
+            }
         }
+
+        // 점수 계산
+        var shotScore = calculateScore(isHit, isHeadshot, reactionTime);
+        score += shotScore;
+
+        // 콤보 처리
+        if (isHit) {
+            combo++;
+            lastHitTime = shotTime;
+        } else {
+            combo = 0;
+        }
+
+        // 히트 이펙트 표시
+        showHitEffect(isHit, isHeadshot, shotScore);
+
+        // 점수 HUD 업데이트
+        updateScoreHUD();
 
         var shotData = {
             hit: isHit,
-            timeout: isTimeout,
+            headshot: isHeadshot,
+            timeout: false,
             angularDistance: angularDistance,
-            reactionTime: isTimeout ? TARGET_LIFETIME : reactionTime,
+            reactionTime: reactionTime,
             trail: mouseTrail.slice(),
-            sensitivity: sensitivity
+            sensitivity: sensitivity,
+            score: shotScore,
+            totalScore: score,
+            combo: combo
         };
 
         mouseTrail = [];
 
         if (onShotCallback) onShotCallback(shotData);
         if (isRunning) spawnTarget();
+    }
+
+    function calculateScore(isHit, isHeadshot, reactionTime) {
+        if (!isHit) return MISS_PENALTY;
+
+        var total = BASE_SCORE;
+
+        // 헤드샷 보너스
+        if (isHeadshot) {
+            total += HEADSHOT_BONUS;
+        }
+
+        // 속도 보너스
+        for (var i = 0; i < SPEED_THRESHOLDS.length; i++) {
+            if (reactionTime <= SPEED_THRESHOLDS[i].time) {
+                total += SPEED_THRESHOLDS[i].bonus;
+                break;
+            }
+        }
+
+        // 콤보 보너스 (현재 콤보 × 10% 추가)
+        if (combo > 0) {
+            total += Math.floor(total * combo * COMBO_MULTIPLIER);
+        }
+
+        return total;
+    }
+
+    function showHitEffect(isHit, isHeadshot, shotScore) {
+        // 화면에 히트 텍스트 이펙트 표시
+        var el = document.createElement('div');
+        el.className = 'hit-effect';
+
+        if (!isHit) {
+            el.textContent = 'MISS';
+            el.classList.add('hit-miss');
+        } else if (isHeadshot) {
+            el.textContent = 'HEADSHOT! +' + shotScore;
+            el.classList.add('hit-headshot');
+        } else {
+            el.textContent = '+' + shotScore;
+            el.classList.add('hit-body');
+        }
+
+        // 크로스헤어 근처에 표시
+        el.style.position = 'fixed';
+        el.style.left = '50%';
+        el.style.top = '45%';
+        el.style.transform = 'translateX(-50%)';
+        el.style.zIndex = '20';
+
+        document.body.appendChild(el);
+
+        // 애니메이션 후 제거
+        setTimeout(function () {
+            if (el.parentNode) el.parentNode.removeChild(el);
+        }, 800);
+    }
+
+    function updateScoreHUD() {
+        var scoreEl = document.getElementById('hud-score');
+        if (scoreEl) {
+            scoreEl.textContent = '점수: ' + score;
+        }
+        var comboEl = document.getElementById('hud-combo');
+        if (comboEl) {
+            if (combo >= 2) {
+                comboEl.textContent = combo + ' COMBO';
+                comboEl.style.display = 'block';
+            } else {
+                comboEl.style.display = 'none';
+            }
+        }
     }
 
     function removeTarget() {
@@ -511,12 +674,7 @@ const Game = (() => {
             });
             targetGroup = null;
         }
-        if (timerRing) {
-            scene.remove(timerRing);
-            timerRing.geometry.dispose();
-            timerRing.material.dispose();
-            timerRing = null;
-        }
+        headMeshRef = null;
         targetPosition = null;
     }
 
@@ -560,31 +718,19 @@ const Game = (() => {
 
         scene.add(targetGroup);
 
-        // 타이머 링 (봇 머리 위)
-        var torusGeo = new THREE.TorusGeometry(0.35, 0.03, 8, 48);
-        var torusMat = new THREE.MeshBasicMaterial({
-            color: 0x00ff00,
-            transparent: true,
-            opacity: 0.8
-        });
-        timerRing = new THREE.Mesh(torusGeo, torusMat);
-        timerRing.position.set(x, BOT_HEIGHT + 0.4, z);
-        scene.add(timerRing);
-
         targetAppearTime = performance.now();
     }
 
     function loop() {
         if (!isRunning) return;
 
-        if (targetPosition && isPointerLocked) {
-            var elapsed = performance.now() - targetAppearTime;
-            if (elapsed >= TARGET_LIFETIME) {
-                fireShot(true);
-            }
-        }
+        // 타임아웃 삭제됨 - 타겟은 클릭할 때까지 유지
 
+        // 봇 살짝 움직이는 애니메이션 (idle motion)
         updateTargetVisuals();
+
+        // 히트 이펙트 업데이트
+        updateHitEffects();
 
         if (renderer && scene && camera) {
             renderer.render(scene, camera);
@@ -596,28 +742,21 @@ const Game = (() => {
     function updateTargetVisuals() {
         if (!targetPosition || !targetGroup) return;
 
+        // 봇이 살짝 위아래로 흔들리는 idle 애니메이션
         var elapsed = performance.now() - targetAppearTime;
-        var timeRatio = Math.max(0, 1 - elapsed / TARGET_LIFETIME);
-
-        // 타이머 링
-        if (timerRing) {
-            timerRing.lookAt(camera.position);
-            var scale = Math.max(0.01, timeRatio);
-            timerRing.scale.set(scale, scale, scale);
-            timerRing.material.color.setRGB(1 - timeRatio, timeRatio, 0);
-            timerRing.material.opacity = 0.3 + timeRatio * 0.5;
-        }
-
-        // 봇 투명도 변화
-        if (timeRatio < 0.3) {
-            targetGroup.traverse(function (child) {
-                if (child.material) {
-                    child.material.transparent = true;
-                    child.material.opacity = 0.4 + timeRatio * 2;
-                }
-            });
-        }
+        var bobAmount = Math.sin(elapsed * 0.002) * 0.02;
+        targetGroup.position.y = bobAmount;
     }
 
-    return { init: init, start: start, stop: stop, setSensitivity: setSensitivity };
+    function updateHitEffects() {
+        // 3D 히트 이펙트 업데이트 (향후 확장용)
+    }
+
+    return {
+        init: init,
+        start: start,
+        stop: stop,
+        setSensitivity: setSensitivity,
+        getScore: getScore
+    };
 })();

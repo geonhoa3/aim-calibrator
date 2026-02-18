@@ -48,7 +48,9 @@
         <div id="game-hud">
             <div class="hud-item" id="hud-round">라운드: 1</div>
             <div class="hud-item" id="hud-sens">감도: -</div>
+            <div class="hud-item hud-score-item" id="hud-score">점수: 0</div>
         </div>
+        <div id="hud-combo" class="hud-combo">0 COMBO</div>
         <div id="crosshair">
             <div class="ch-dot"></div>
             <div class="ch-line ch-top"></div>
@@ -79,6 +81,14 @@
                 <div class="result-row">
                     <span class="result-label">cm/360</span>
                     <span class="result-value" id="result-cm360">-</span>
+                </div>
+                <div class="result-row">
+                    <span class="result-label">최종 점수</span>
+                    <span class="result-value" id="result-score">-</span>
+                </div>
+                <div class="result-row">
+                    <span class="result-label">헤드샷 비율</span>
+                    <span class="result-value" id="result-headshot">-</span>
                 </div>
             </div>
 

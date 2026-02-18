@@ -10,6 +10,12 @@ const Result = (() => {
         document.getElementById('result-edpi').textContent = data.edpi;
         document.getElementById('result-cm360').textContent = data.cm360 + ' cm';
 
+        // 점수 & 헤드샷 표시
+        var scoreEl = document.getElementById('result-score');
+        if (scoreEl) scoreEl.textContent = data.stats.finalScore;
+        var hsEl = document.getElementById('result-headshot');
+        if (hsEl) hsEl.textContent = data.stats.headshotRate + '% (' + data.stats.headshots + '/' + data.stats.hits + ')';
+
         // 오버워치 설정 가이드
         document.getElementById('guide-sens').textContent = data.recommendedSens;
         document.getElementById('guide-dpi').textContent = data.dpi;
@@ -67,17 +73,19 @@ const Result = (() => {
         ctx.lineTo(w - 40, 140);
         ctx.stroke();
 
-        // 상세 정보 (4열)
+        // 상세 정보 (5열)
         var infoY = 172;
         var cols = [
             { label: 'DPI', value: data.dpi },
             { label: 'eDPI', value: data.edpi },
             { label: 'cm/360', value: data.cm360 + 'cm' },
-            { label: '배율', value: data.multiplier + 'x' }
+            { label: '배율', value: data.multiplier + 'x' },
+            { label: '점수', value: data.stats.finalScore }
         ];
 
+        var colWidth = (w - 80) / cols.length;
         for (var i = 0; i < cols.length; i++) {
-            var x = 75 + i * 120;
+            var x = 40 + colWidth / 2 + i * colWidth;
             ctx.fillStyle = '#f79e02';
             ctx.font = 'bold 20px Segoe UI, sans-serif';
             ctx.textAlign = 'center';
@@ -96,10 +104,10 @@ const Result = (() => {
         ctx.fillStyle = '#555';
         ctx.font = '12px Segoe UI, sans-serif';
         ctx.textAlign = 'center';
-        var timeoutText = data.stats.timeouts > 0 ? ' | 타임아웃 ' + data.stats.timeouts + '회' : '';
         ctx.fillText(
             '정확도 ' + data.stats.accuracy + '% | 반응속도 ' + data.stats.avgReactionMs + 'ms | ' +
-            '오버슈팅 ' + data.stats.overshoots + '회 | 언더슈팅 ' + data.stats.undershoots + '회' + timeoutText,
+            '헤드샷 ' + data.stats.headshotRate + '% | ' +
+            '오버슈팅 ' + data.stats.overshoots + '회 | 언더슈팅 ' + data.stats.undershoots + '회',
             w / 2, statsY
         );
 

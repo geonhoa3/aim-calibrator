@@ -426,3 +426,65 @@ body {
     justify-content: center;
     flex-wrap: wrap;
 }
+
+/* ===== Score HUD ===== */
+.hud-score-item {
+    color: #f79e02 !important;
+    font-weight: 700;
+    font-size: 1rem !important;
+}
+
+.hud-combo {
+    position: fixed;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 15;
+    font-size: 1.4rem;
+    font-weight: 900;
+    color: #f79e02;
+    text-shadow: 0 0 10px rgba(247, 158, 2, 0.6), 0 2px 4px rgba(0, 0, 0, 0.5);
+    display: none;
+    animation: comboPulse 0.3s ease-out;
+}
+
+@keyframes comboPulse {
+    0% { transform: translateX(-50%) scale(1.4); }
+    100% { transform: translateX(-50%) scale(1); }
+}
+
+/* ===== Hit Effects ===== */
+.hit-effect {
+    font-weight: 900;
+    font-size: 1.3rem;
+    pointer-events: none;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+    animation: hitFloat 0.8s ease-out forwards;
+    white-space: nowrap;
+}
+
+.hit-body {
+    color: #fff;
+}
+
+.hit-headshot {
+    color: #ff4444;
+    font-size: 1.6rem;
+    text-shadow: 0 0 12px rgba(255, 68, 68, 0.8), 0 2px 8px rgba(0, 0, 0, 0.7);
+}
+
+.hit-miss {
+    color: #888;
+    font-size: 1rem;
+}
+
+@keyframes hitFloat {
+    0% {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-40px);
+    }
+}

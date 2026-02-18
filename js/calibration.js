@@ -73,13 +73,16 @@ const Calibration = (() => {
         var analysis = analyzeShot(shotData);
         shotHistory.push({
             hit: shotData.hit,
+            headshot: shotData.headshot || false,
             timeout: shotData.timeout,
             angularDistance: shotData.angularDistance,
             reactionTime: shotData.reactionTime,
             trail: shotData.trail,
             sensitivity: shotData.sensitivity,
             analysis: analysis,
-            multiplier: currentMultiplier
+            multiplier: currentMultiplier,
+            score: shotData.score || 0,
+            totalScore: shotData.totalScore || 0
         });
 
         var converged = currentRound >= MIN_ROUNDS && isConverged();
@@ -186,6 +189,7 @@ const Calibration = (() => {
         var cm360 = Math.round(calcCm360(recommendedSens, userDPI) * 10) / 10;
 
         var hits = shotHistory.filter(function (s) { return s.hit; }).length;
+        var headshots = shotHistory.filter(function (s) { return s.headshot; }).length;
         var timeouts = shotHistory.filter(function (s) { return s.timeout; }).length;
         var validShots = shotHistory.filter(function (s) { return !s.timeout; });
         var avgReaction = validShots.length > 0
@@ -193,6 +197,7 @@ const Calibration = (() => {
             : 0;
         var overshoots = shotHistory.filter(function (s) { return s.analysis.type === 'overshoot'; }).length;
         var undershoots = shotHistory.filter(function (s) { return s.analysis.type === 'undershoot'; }).length;
+        var finalScore = shotHistory.length > 0 ? shotHistory[shotHistory.length - 1].totalScore : 0;
 
         var sensHistory = shotHistory.map(function (s, i) {
             return {
@@ -213,11 +218,14 @@ const Calibration = (() => {
             stats: {
                 totalShots: shotHistory.length,
                 hits: hits,
+                headshots: headshots,
+                headshotRate: hits > 0 ? Math.round((headshots / hits) * 100) : 0,
                 timeouts: timeouts,
                 accuracy: Math.round((hits / shotHistory.length) * 100),
                 avgReactionMs: Math.round(avgReaction),
                 overshoots: overshoots,
-                undershoots: undershoots
+                undershoots: undershoots,
+                finalScore: finalScore
             },
             sensHistory: sensHistory
         };
